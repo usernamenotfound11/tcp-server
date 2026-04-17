@@ -1,5 +1,6 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sys/random.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -9,6 +10,8 @@
 #include <stdint.h>
 #include <poll.h>
 #include <dirent.h>
+#include <openssl/evp.h>
+#include <openssl/aes.h>
 
 void write_log(); //wip
 
@@ -74,18 +77,66 @@ int function_check(char* buffer) {
 	return 0;
 }
 
+void id_generator( uint8_t id[4][4]){
+        uint8_t bufferr[16];
+        ssize_t r=getrandom(bufferr,sizeof(bufferr),0);
+        for(int i=0;i<4;i++){
+        for(int j=0;j<4;j++){
+        id[i][j]=bufferr[i * 4 + j];
+                }
+        }
+}
+
 struct arg{
 	char *text;
 };
 
 struct user{
-	char *username;
-	unsigned char *password;
+	char username[16];
+	char password[32];
 	int fd;
-	int id;
-};		//wip
+	uint8_t id[16];
+	int confirmed;
+};
+
+uint8_t convert_password();
+
+int store_user_data(uint id[16] , char username[] , uint8_t password[] , ssize_t usr_len , ssize_t passwd_len){
+        if((username == NULL && password == NULL) || (usr_len < 0 && passwd_len < 0)) {
+        printf("[!]Error:there's no username to register");
+        printf("[!]Exit code 991: reg");
+        return 991;
+        }
+        int local_db;
+        if(access("passwd.txt" , F_OK) == 0) {
+        local_db = open("passwd.txt" , O_RDWR , 0644);
+        }else {
+        local_db = open("passwd.txt" , O_RDWR | O_TRUNC | O_CREAT , 0644);
+        }
+
+        if(write(local_db , username , usr_len) != usr_len) {
+        return -1;
+        }
+
+        if(write(local_db , ":" , 1) != 1) {
+        return -1;
+        }
+
+
+        if(write(local_db , password , passwd_len) != passwd_len) {
+        return -1;
+        }
+
+        close(local_db);
+        return 60;
+
+}
+
 
 int main() {
+
+	char* message_1 = "USERNAME:\n";
+	char* message_2 = "PASSWORD:\n";
 
 	struct sockaddr_in sin;
 
@@ -102,8 +153,8 @@ int main() {
 	int binded = bind(server_socket , (struct sockaddr *)&sin , sizeof(sin));
 
 	listen(server_socket , 2);
-	struct pollfd fds[10];
-
+	struct pollfd fds[5];
+	struct user user_fd[5];
 	int nfds = 1;
 	fds[0].fd = server_socket;
 	fds[0].events = POLLIN;
@@ -120,10 +171,12 @@ int main() {
 	for(int i=0; i<nfds; i++) {
 	if(fds[i].fd == server_socket) {
 	if(fds[i].revents & POLLIN) {
- 
+
 	int client = accept(server_socket , 0 , 0);
 	if(client > 0) {
 	fds[nfds].fd = client;
+	user_fd[nfds].fd = client;
+	user_fd[nfds].confirmed = 0;
 	fds[nfds].events = POLLIN;
 	nfds++;
 		}
@@ -131,6 +184,47 @@ int main() {
 
 		}
 	}else {
+
+	if(user_fd[i].confirmed == 0) {
+	send(fds[i].fd , message_1 , strlen(message_1) ,0);
+	ssize_t rr1 = recv(fds[i].fd , user_fd[i].username , 15 , 0);
+	if(rr1 < 0) {
+	perror("recv");
+	continue;
+		}
+
+	if(rr1 == 0) {
+	close(fds[i].fd);
+	fds[i] = fds[nfds - 1];
+	nfds--;
+	i--;
+	continue;
+	}
+
+	user_fd[i].username[rr1] = '\0';
+
+        send(fds[i].fd , message_2 , strlen(message_2) ,0);
+        ssize_t rr2 = recv(fds[i].fd , user_fd[i].password , 31 , 0);
+        if(rr2 < 0) {
+        perror("recv");
+        continue;
+                }
+
+        if(rr2 == 0) {
+        close(fds[i].fd);
+        fds[i] = fds[nfds - 1];
+        nfds--;
+        i--;
+        continue;
+        }
+
+        user_fd[i].password[rr2] = '\0';
+
+	user_fd[i].confirmed = 1;
+	send(fds[i].fd , "ACT\n" , 4 , 0);
+	}
+
+	if(user_fd[i].confirmed == 1) {
 	struct arg args[5];
 	for(int i=0; i<5;i++) {
 	args[i].text = NULL;
@@ -256,7 +350,7 @@ int main() {
 
 	}
 
-
+	}
 			}
 		}
 
@@ -265,5 +359,4 @@ int main() {
 	}
 
 	close(server_socket);
-}
-
+} 
