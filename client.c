@@ -24,7 +24,45 @@ int main() {
 	perror("connect");
 	close(server_socket);
 	}
+	char message1[20];
+	char message2[20];
+	char username[16];
+	char password[32];
 
+	ssize_t rr1 = recv(server_socket , message1 , 19 , 0);
+	if(rr1 <= 0) close(server_socket);
+	if(rr1 > 0) message1[rr1] = '\0';
+	if(write(1,message1,rr1) <= 0) {
+	perror("write");
+	close(server_socket);
+	}
+
+	ssize_t rr1q = read(0 , username ,15);
+	if (rr1q <= 0) close(server_socket);
+	if (rr1q > 0) username[rr1q] = '\0';
+	send(server_socket , username , rr1q , 0);
+
+        ssize_t rr2 = recv(server_socket , message2 , 19 , 0);
+        if(rr2 <= 0) close(server_socket);
+        if(rr2 > 0) message2[rr2] = '\0';
+        if(write(1,message2,rr2) <= 0) {
+        perror("write");
+        close(server_socket);
+        }
+
+        ssize_t rr2q = read(0 , password ,32);
+        if (rr2q <= 0) close(server_socket);
+        if (rr2q > 0) password[rr2q] = '\0';
+        send(server_socket , password , rr2q , 0);
+
+	char auth[5];
+	int ready = 0;
+	recv(server_socket , auth , 4 , 0);
+	if(strstr(auth , "ACT\n") != 0) {
+	ready = 1;
+	}
+
+	if(ready == 1) {
 	char *input = calloc(50 , sizeof(char));
 	char *got = calloc(500 , sizeof(char));
 	ssize_t r = read(0 , input , 49);
@@ -51,6 +89,7 @@ int main() {
 
 }
 
+}
 	close(server_socket);
 
 }
