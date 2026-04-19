@@ -13,6 +13,8 @@
 #include <openssl/evp.h>
 #include <openssl/aes.h>
 
+#define MAX_BUFF_SIZE 512
+
 void write_log(); //wip
 
 char* function(char** p) {
@@ -77,15 +79,16 @@ int function_check(char* buffer) {
 	return 0;
 }
 
-void id_generator( uint8_t id[4][4]){
-        uint8_t bufferr[16];
-        ssize_t r=getrandom(bufferr,sizeof(bufferr),0);
-        for(int i=0;i<4;i++){
-        for(int j=0;j<4;j++){
-        id[i][j]=bufferr[i * 4 + j];
-                }
-        }
+/*
+wip
+void id_generator(char id[16]){
+	int buffeer[16];
+	for(int i=0; i < 16; i++) {
+	buffeer[i] =rand() % 10;
+	id[i] = buffeer[i] + '0';
+	}
 }
+*/
 
 struct arg{
 	char *text;
@@ -95,24 +98,57 @@ struct user{
 	char username[16];
 	char password[32];
 	int fd;
-	uint8_t id[16];
 	int confirmed;
+	char buffer[MAX_BUFF_SIZE];
+	size_t buf_len;
 };
 
 uint8_t convert_password();
 
-int store_user_data(uint id[16] , char username[] , uint8_t password[] , ssize_t usr_len , ssize_t passwd_len){
-        if((username == NULL && password == NULL) || (usr_len < 0 && passwd_len < 0)) {
-        printf("[!]Error:there's no username to register");
-        printf("[!]Exit code 991: reg");
-        return 991;
-        }
-        int local_db;
-        if(access("passwd.txt" , F_OK) == 0) {
-        local_db = open("passwd.txt" , O_RDWR , 0644);
-        }else {
-        local_db = open("passwd.txt" , O_RDWR | O_TRUNC | O_CREAT , 0644);
-        }
+void delete_newline(char* input) {
+	char *newline = strchr(input , '\n');
+	if(newline) {
+	*newline = '\0';
+	}
+
+}
+
+void trim(char* input) {
+	char *s = input;
+
+	while(*input) {
+	if(*input != ' ') {
+	*s = *input;
+	s++;
+		}
+	input++;
+	}
+	*s = '\0';
+
+}
+
+int store_user_data( char username[] , char password[] , ssize_t usr_len , ssize_t passwd_len){
+
+	if(username == NULL || password == NULL) {
+	return -1;
+	}
+
+	delete_newline(username);
+	delete_newline(password);
+	trim(username);
+	trim(password);
+
+	if(strlen(username) == 0 || strlen(password) == 0) {
+	return 991;
+	}
+
+
+
+        int local_db = open("passwd.txt" , O_RDWR | O_APPEND | O_CREAT , 0644);
+
+	if(local_db < 0) {
+	return -1;
+	}
 
         if(write(local_db , username , usr_len) != usr_len) {
         return -1;
@@ -127,6 +163,10 @@ int store_user_data(uint id[16] , char username[] , uint8_t password[] , ssize_t
         return -1;
         }
 
+        if(write(local_db , "\n" , 1) != 1) {
+        return -1;
+        }
+
         close(local_db);
         return 60;
 
@@ -135,8 +175,12 @@ int store_user_data(uint id[16] , char username[] , uint8_t password[] , ssize_t
 
 int main() {
 
+	//messages
+
 	char* message_1 = "USERNAME:\n";
 	char* message_2 = "PASSWORD:\n";
+
+	//initialize server
 
 	struct sockaddr_in sin;
 
@@ -161,6 +205,8 @@ int main() {
 
 	while(1) {
 
+	//creating poll for managed amount of user
+
 	int ret = poll(fds , nfds , -1);
 
 	if(ret == -1) {
@@ -171,6 +217,8 @@ int main() {
 	for(int i=0; i<nfds; i++) {
 	if(fds[i].fd == server_socket) {
 	if(fds[i].revents & POLLIN) {
+
+	//connecting new user & put fd of user in structure
 
 	int client = accept(server_socket , 0 , 0);
 	if(client > 0) {
@@ -183,11 +231,13 @@ int main() {
 
 
 		}
+
+
 	}else {
 
 	if(user_fd[i].confirmed == 0) {
-	send(fds[i].fd , message_1 , strlen(message_1) ,0);
-	ssize_t rr1 = recv(fds[i].fd , user_fd[i].username , 15 , 0);
+	send(user_fd[i].fd , message_1 , strlen(message_1) ,0);
+	ssize_t rr1 = recv(user_fd[i].fd , user_fd[i].username , 15 , 0);
 	if(rr1 < 0) {
 	perror("recv");
 	continue;
@@ -196,6 +246,7 @@ int main() {
 	if(rr1 == 0) {
 	close(fds[i].fd);
 	fds[i] = fds[nfds - 1];
+	user_fd[i] = user_fd[nfds - 1];
 	nfds--;
 	i--;
 	continue;
@@ -203,8 +254,8 @@ int main() {
 
 	user_fd[i].username[rr1] = '\0';
 
-        send(fds[i].fd , message_2 , strlen(message_2) ,0);
-        ssize_t rr2 = recv(fds[i].fd , user_fd[i].password , 31 , 0);
+        send(user_fd[i].fd , message_2 , strlen(message_2) ,0);
+        ssize_t rr2 = recv(user_fd[i].fd , user_fd[i].password , 31 , 0);
         if(rr2 < 0) {
         perror("recv");
         continue;
@@ -213,15 +264,35 @@ int main() {
         if(rr2 == 0) {
         close(fds[i].fd);
         fds[i] = fds[nfds - 1];
+	user_fd[i] = user_fd[nfds - 1];
         nfds--;
         i--;
         continue;
         }
 
         user_fd[i].password[rr2] = '\0';
-
+        int stored = store_user_data( user_fd[i].username , user_fd[i].password , rr1 , rr2);
+	if(stored == 991) {
+	send(user_fd[i].fd , "EXI\n" , 4 , 0);
+	close(fds[i].fd);
+	fds[i] = fds[nfds - 1];
+	user_fd[i] = user_fd[nfds - 1];
+	nfds--;
+	i--;
+	printf("[!]no username or password detected\n");
+	continue;
+	}else if(stored == -1) {
+	perror("store function");
+        close(fds[i].fd);
+        fds[i] = fds[nfds - 1];
+        user_fd[i] = user_fd[nfds - 1];
+        nfds--;
+        i--;
+        continue;
+	}else {
 	user_fd[i].confirmed = 1;
-	send(fds[i].fd , "ACT\n" , 4 , 0);
+	send(user_fd[i].fd , "ACT\n" , 4 , 0);
+	}
 	}
 
 	if(user_fd[i].confirmed == 1) {
@@ -231,11 +302,12 @@ int main() {
 	}
         char *buffer = calloc(100 , sizeof(char));
         int len = 100;
-        ssize_t r = recv(fds[i].fd , buffer , len - 1, 0);
+        ssize_t r = recv(user_fd[i].fd , buffer , len - 1, 0);
 
 	if (r == 0) {
     	close(fds[i].fd);
     	fds[i] = fds[nfds - 1];
+        user_fd[i] = user_fd[nfds - 1];
 	    nfds--;
     	i--;
     	free(buffer);
@@ -250,9 +322,8 @@ int main() {
 
 
         if(r > 0) {
-        char *p = buffer;
-	char *result = function(&p);
-	args[0].text = result;
+        trim(buffer);
+	args[0].text = buffer;
 	int checker = function_check(args[0].text);
 
 
@@ -261,6 +332,7 @@ int main() {
 	printf("disconnect[!]\n");
         close(fds[i].fd);
         fds[i] = fds[nfds - 1];
+        user_fd[i] = user_fd[nfds - 1];
             nfds--;
         i--;
         free(buffer);
@@ -315,8 +387,13 @@ int main() {
         }
 
 	int fd = open(args[1].text , O_RDONLY , 0644);
+	if(fd < 0) {
+	break;
+	}
 	int fd1 = open(args[2].text , O_WRONLY , 0644);
-
+	if(fd1 < 0) {
+	break;
+	}
 	ssize_t abc = read(fd , copied , 4096);
 	write(fd1 , copied , abc);
 	close(fd);
@@ -342,10 +419,10 @@ int main() {
 	if(strcmp(entry->d_name , ".") == 0 || strcmp(entry->d_name , "..") == 0) {
 	continue;
 		}
-	send(fds[i].fd , entry->d_name , strlen(entry->d_name) , 0);
-	send(fds[i].fd , "\n" , 1 , 0);
+	send(user_fd[i].fd , entry->d_name , strlen(entry->d_name) , 0);
+	send(user_fd[i].fd , "\n" , 1 , 0);
 	}
-	send(fds[i].fd , "EOF\n" , 4 , 0);
+	send(user_fd[i].fd , "EOF\n" , 4 , 0);
 	closedir(dir);
 
 	}
@@ -359,4 +436,4 @@ int main() {
 	}
 
 	close(server_socket);
-} 
+}
